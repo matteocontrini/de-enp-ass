@@ -10,105 +10,42 @@
 import re, sys, os, csv
 
 
-def get_item_title(item):
-    return item.strip().split('\n')[0]
-
-
 def get_item_part(item, part):
     """Returns a specific part of the item, like 'password'"""
     try:
-        return re.findall('{} (.*?)\n'.format(part), '{}\n'.format(item),
+        return re.findall('{} : (.*?)\n'.format(part), '{}\n'.format(item),
                           re.IGNORECASE)[0]
     except IndexError:
         return ''
 
 
-def get_item_notes(item):
+def get_item_notes(notes):
     """Returns everything in the item that does not have a 'label'
         (like 'password' or 'username')
     """
-    notes = '{}\n'.format('\n'.join(item.strip().split('\n')[1:]))
-    for l in ['password', 'username', 'email', 'url', 'label', 'grouping:']:
-       notes = re.sub('{} (.*?)\n'.format(l), '', notes, flags=re.I)
-    return notes
+    #notes = '{}\n'.format('\n'.join(notes.strip().split('\n')[1:]))
+    for l in ['title', 'password', 'username', 'nome utente', 'email', 'url']:
+       notes = re.sub('{} : (.*?)(?:\n|$)'.format(l), '', notes, flags=re.I)
+    
+    return notes.strip()
 
 
 def to_password_item(item):
     """Returns a dict version of an item"""
-    return {
-        'title': get_item_title(item),
+    out = {
+        'title': get_item_part(item, 'title'),
         'password': get_item_part(item, 'password'),
-        'username': get_item_part(item, 'username'),
+        'username': get_item_part(item, 'username') or get_item_part(item, 'nome utente'),
         'email': get_item_part(item, 'email'),
         'url': get_item_part(item, 'url'),
-        'label': get_item_part(item, 'label'),
-        'grouping': get_item_part(item, 'grouping:').lower(),
         'notes': get_item_notes(item)
     }
-
-
-def normalized_groupings(file):
-    """Normalize grouping
-    In some cases the grouping value gets a new line...
-    In some cases the grouping is not appended by a colon...
-    In some cases grouping: is not appended by a space...
-    Lets normalize that...
-    """
-    file = file.replace('\ngrouping ', '\ngrouping:')\
-            .replace('\ngrouping:\n', '\ngrouping: ')\
-            .replace('\ngrouping:', '\ngrouping: ')\
-            .replace('\ngrouping:  ', '\ngrouping: ')\
-            .replace('\ngrouping:\n', '\ngrouping: ')
-    return file
-
-
-def parse_credit_card(password):
-    return {
-        'title': password['title'],
-        'card number': get_item_part(password['notes'], 'number'),
-        'expiry date': get_item_part(password['notes'], 'expiry date'),
-        'cardholder': get_item_part(password['notes'], 'cardholder'),
-        'pin': get_item_part(password['notes'], 'pin'),
-        'bank name': get_item_part(password['notes'], 'Issuing bank'),
-        'CVV': get_item_part(password['notes'], 'CVC'),
-        # it's harder to parse note so everything is included
-        'notes': password['notes']
-    }
-
-
-def is_credit_card(password):
-    return (get_item_part(password['notes'], 'cardholder') and
-            get_item_part(password['notes'], 'type'))
-
-
-def is_secure_note(password):
-    return password['grouping'] == 'secure notes'
-
-
-def is_login(password):
-    return (not is_secure_note(password) and not is_credit_card(password))
-
-
-def get_logins(passwords):
-    return [{
-        'title': p['title'],
-        'URL': p['url'],
-        'username': p['username'],
-        'password': p['password'],
-        'notes': p['notes'],
-        'email': p['email'],
-        'label': p['label']
-    } for p in passwords if is_login(p)]
-
-
-def get_secure_notes(passwords):
-    return [{'title': p['title'], 'text': p['notes']}
-            for p in passwords if is_secure_note(p)]
-
-
-def get_credit_cards(passwords):
-    p_cards = [p for p in passwords if is_credit_card(p)]
-    return [parse_credit_card(p) for p in p_cards]
+    
+    if out['username'] == '' and out['email'] != '':
+        out['username'] = out['email']
+        out['email'] = ''
+    
+    return out
 
 
 def write_csv_file(path, passwords, fieldnames):
@@ -123,31 +60,17 @@ def main(file_path):
     """Do all the things"""
     with open(file_path, 'r') as enpass_file:
         file = enpass_file.read().strip()
-        file = normalized_groupings(file)
-        items = file.split('\n\n')
+        items = file.split('\n\n\n')
         passwords = [to_password_item(item) for item in items]
 
-        secure_notes = get_secure_notes(passwords)
-        credit_cards = get_credit_cards(passwords)
-        logins = get_logins(passwords)
-
         print('Found {} items:'.format(len(passwords)))
-        print('{} logins'.format(len(logins)))
-        print('{} credit cards'.format(len(credit_cards)))
-        print('{} secure notes'.format(len(secure_notes)))
 
         file_name = os.path.splitext(file_path)[0]
 
         logins_path = '{}-logins.csv'.format(file_name)
-        cc_path = '{}-credit-cards.csv'.format(file_name)
-        notes_path = '{}-notes.csv'.format(file_name)
-
-        write_csv_file(notes_path, secure_notes, ['title', 'text'])
-        write_csv_file(cc_path, credit_cards, ['title', 'card number', 'expiry date',
-                                               'cardholder', 'pin', 'bank name',
-                                               'CVV', 'notes'])
-        write_csv_file(logins_path, logins, ['title', 'URL', 'username', 'password',
-                                             'notes', 'email', 'label'])
+        
+        write_csv_file(logins_path, passwords, ['title', 'url', 'username', 'password',
+                                             'notes', 'email'])
         print('conversion complete')
         enpass_file.close()
 
